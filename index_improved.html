@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Heart Pulse</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      display: block;
+      transform-origin: center center;
+      animation: heart 1.5s ease infinite;
+    }
+
+    canvas.burst {
+      animation: heartBurst 0.8s cubic-bezier(.2, .9, .2, 1) forwards;
+    }
+
+    .ui {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
+
+    .click-btn {
+      padding: 16px 32px;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #ff5ea8, #ff2d75);
+      color: #fff;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      box-shadow: 0 15px 35px rgba(255, 45, 117, 0.35);
+      transition: transform 0.25s ease, box-shadow 0.25s ease, opacity 0.6s ease;
+      /* Ẩn nút cho đến khi đám mây trái tim đã hiện ra (xem .click-btn.visible) */
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .click-btn.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .click-btn:hover {
+      transform: translateY(-3px) scale(1.03);
+      box-shadow: 0 18px 40px rgba(255, 45, 117, 0.45);
+    }
+
+    .click-btn:active {
+      transform: scale(0.96);
+    }
+
+    .click-btn.is-clicked {
+      opacity: 0 !important;
+      transform: scale(0.95);
+      pointer-events: none;
+    }
+
+    .transition-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 1);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 3;
+      transition: opacity 0.9s ease;
+    }
+
+    body.transitioning .transition-overlay {
+      opacity: 1;
+    }
+
+    @keyframes heart {
+      0% {
+        transform: scale(1);
+      }
+      30% {
+        transform: scale(.8);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    @keyframes heartBurst {
+      0% {
+        transform: scale(1);
+      }
+      40% {
+        transform: scale(1.15);
+      }
+      100% {
+        transform: scale(1.35);
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="pinkboard"></canvas>
+
+  <div class="ui">
+    <button id="click-btn" class="click-btn" type="button">Click me!</button>
+  </div>
+
+  <div id="transition-overlay" class="transition-overlay"></div>
+
+  <script>
+    var settings = {
+      particles: {
+        length: 4500,
+        duration: 3.5,
+        velocity: 135,
+        effect: -0.35,
+        size: 16,
+      },
+      heart: {
+        // Kích thước thật của TOÀN BỘ đám mây ở trạng thái nghỉ (heartScale=1),
+        // KHÔNG PHẢI chỉ riêng đường cong trái tim nhỏ (pointOnHeart) — mà là
+        // đường cong đó CỘNG THÊM quãng đường mỗi hạt bay ra xa thêm do vận tốc
+        // (particles.velocity) trước khi tắt dần. Đây mới là "điểm cuối" thật
+        // sự của đám mây, nên phải dùng số này làm mốc scale-to-fit, không phải
+        // bounding box 256 x 231 của riêng đường cong trái tim.
+        width: 619.34,
+        height: 602.21,
+        // đám mây sẽ chiếm khoảng % này của cạnh ngắn hơn (width hoặc height)
+        fill: 0.9,
+      },
+    };
+
+    var isTransitioning = false;
+    var button = document.getElementById("click-btn");
+    var canvas = document.getElementById("pinkboard");
+    var heartScale = 0.78; // giá trị mặc định ban đầu, sẽ được tính lại bên dưới
+
+    // Tính lại heartScale theo đúng tỉ lệ khung hình hiện tại (contain-fit):
+    // lấy tỉ lệ nhỏ hơn giữa chiều rộng/chiều cao khả dụng so với kích thước
+    // của TOÀN BỘ đám mây (settings.heart.width/height, đã gồm cả quãng đường
+    // hạt bay ra), để cả đám mây luôn vừa khít mà không méo hay tràn ra ngoài,
+    // dù là màn dọc (mobile) hay ngang (desktop/ultra-wide). heartScale này
+    // được dùng để scale CẢ vị trí sinh hạt LẪN vận tốc bay ra của hạt.
+    function calculateHeartScale() {
+      if (!canvas.width || !canvas.height) return;
+      var scaleX = canvas.width / settings.heart.width;
+      var scaleY = canvas.height / settings.heart.height;
+      heartScale = Math.min(scaleX, scaleY) * settings.heart.fill;
+    }
+
+    (function() {
+      var b = 0;
+      var c = ["ms", "moz", "webkit", "o"];
+      for (var a = 0; a < c.length && !window.requestAnimationFrame; ++a) {
+        window.requestAnimationFrame = window[c[a] + "RequestAnimationFrame"];
+        window.cancelAnimationFrame = window[c[a] + "CancelAnimationFrame"] || window[c[a] + "CancelRequestAnimationFrame"];
+      }
+      if (!window.requestAnimationFrame) {
+        window.requestAnimationFrame = function(h, e) {
+          var d = new Date().getTime();
+          var f = Math.max(0, 16 - (d - b));
+          var g = window.setTimeout(function() {
+            h(d + f);
+          }, f);
+          b = d + f;
+          return g;
+        };
+      }
+      if (!window.cancelAnimationFrame) {
+        window.cancelAnimationFrame = function(d) {
+          clearTimeout(d);
+        };
+      }
+    })();
+
+    var Point = (function() {
+      function Point(x,     y) {
+        this.x = (typeof x !== "undefined") ? x : 0;
+        this.y = (typeof y !== "undefined") ? y : 0;
+      }
+      Point.prototype.clone = function() {
+        return new Point(this.x, this.y);
+      };
+      Point.prototype.length = function(length) {
+        if (typeof length === "undefined") {
+          return Math.sqrt(this.x * this.x + this.y * this.y);
+        }
+        this.normalize();
+        this.x *= length;
+        this.y *= length;
+        return this;
+      };
+      Point.prototype.normalize = function() {
+        var length = this.length();
+        this.x /= length;
+        this.y /= length;
+        return this;
+      };
+      return Point;
+    })();
+
+    var Particle = (function() {
+      function Particle() {
+        this.position = new Point();
+        this.velocity = new Point();
+        this.acceleration = new Point();
+        this.age = 0;
+      }
+      Particle.prototype.initialize = function(x, y, dx, dy) {
+        this.position.x = x;
+        this.position.y = y;
+        this.velocity.x = dx;
+        this.velocity.y = dy;
+        this.acceleration.x = dx * settings.particles.effect;
+        this.acceleration.y = dy * settings.particles.effect;
+        this.age = 0;
+      };
+      Particle.prototype.update = function(deltaTime) {
+        this.position.x += this.velocity.x * deltaTime;
+        this.position.y += this.velocity.y * deltaTime;
+        this.velocity.x += this.acceleration.x * deltaTime;
+        this.velocity.y += this.acceleration.y * deltaTime;
+        this.age += deltaTime;
+      };
+      Particle.prototype.draw = function(context, image) {
+        function ease(t) {
+          return (--t) * t * t + 1;
+        }
+        var size = image.width * ease(this.age / settings.particles.duration);
+        context.globalAlpha = 1 - this.age / settings.particles.duration;
+        context.drawImage(image, this.position.x - size / 2, this.position.y - size / 2, size, size);
+      };
+      return Particle;
+    })();
+
+    var ParticlePool = (function() {
+      var particles,
+        firstActive = 0,
+        firstFree = 0,
+        duration = settings.particles.duration;
+
+      function ParticlePool(length) {
+        particles = new Array(length);
+        for (var i = 0; i < particles.length; i++) {
+          particles[i] = new Particle();
+        }
+      }
+      ParticlePool.prototype.add = function(x, y, dx, dy) {
+        particles[firstFree].initialize(x, y, dx, dy);
+        firstFree++;
+        if (firstFree === particles.length) firstFree = 0;
+        if (firstActive === firstFree) firstActive++;
+        if (firstActive === particles.length) firstActive = 0;
+      };
+      ParticlePool.prototype.update = function(deltaTime) {
+        var i;
+        if (firstActive < firstFree) {
+          for (i = firstActive; i < firstFree; i++) {
+            particles[i].update(deltaTime);
+          }
+        }
+        if (firstFree < firstActive) {
+          for (i = firstActive; i < particles.length; i++) {
+            particles[i].update(deltaTime);
+          }
+          for (i = 0; i < firstFree; i++) {
+            particles[i].update(deltaTime);
+          }
+        }
+        while (particles[firstActive].age >= duration && firstActive !== firstFree) {
+          firstActive++;
+          if (firstActive === particles.length) firstActive = 0;
+        }
+      };
+      ParticlePool.prototype.draw = function(context, image) {
+        if (firstActive < firstFree) {
+          for (var i = firstActive; i < firstFree; i++) {
+            particles[i].draw(context, image);
+          }
+        }
+        if (firstFree < firstActive) {
+          for (var i = firstActive; i < particles.length; i++) {
+            particles[i].draw(context, image);
+          }
+          for (var i = 0; i < firstFree; i++) {
+            particles[i].draw(context, image);
+          }
+        }
+      };
+      return ParticlePool;
+    })();
+
+    (function(canvas) {
+      var context = canvas.getContext("2d");
+      var particles = new ParticlePool(settings.particles.length);
+      var particleRate = settings.particles.length / settings.particles.duration;
+      var time;
+
+      function pointOnHeart(t) {
+        return new Point(
+          128 * Math.pow(Math.sin(t), 3),
+          104 * Math.cos(t) - 40 * Math.cos(2 * t) - 16 * Math.cos(3 * t) - 8 * Math.cos(4 * t) + 25
+        );
+      }
+
+      function spawnBurst(amount) {
+        for (var i = 0; i < amount; i++) {
+          var t = Math.PI - 2 * Math.PI * Math.random();
+          var scale = Math.sqrt(Math.random());
+          var pos = pointOnHeart(t);
+          pos.x *= scale * heartScale;
+          pos.y *= scale * heartScale;
+          var dir = pos.clone().length(settings.particles.velocity * 1.35 * heartScale);
+          particles.add(canvas.width / 2 + pos.x, canvas.height / 2 - pos.y, dir.x, -dir.y);
+        }
+      }
+
+      var image = (function() {
+        var imageCanvas = document.createElement("canvas");
+        var imageContext = imageCanvas.getContext("2d");
+        imageCanvas.width = settings.particles.size;
+        imageCanvas.height = settings.particles.size;
+
+        function to(t) {
+          var point = pointOnHeart(t);
+          point.x = settings.particles.size / 3 + point.x * settings.particles.size / 550;
+          point.y = settings.particles.size / 3 - point.y * settings.particles.size / 550;
+          return point;
+        }
+
+        imageContext.beginPath();
+        var t = -Math.PI;
+        var point = to(t);
+        imageContext.moveTo(point.x, point.y);
+        while (t < Math.PI) {
+          t += 0.01;
+          point = to(t);
+          imageContext.lineTo(point.x, point.y);
+        }
+        imageContext.closePath();
+        imageContext.fillStyle = "#ea80b0";
+        imageContext.fill();
+
+        var image = new Image();
+        image.src = imageCanvas.toDataURL();
+        return image;
+      })();
+
+      function render() {
+        requestAnimationFrame(render);
+
+        var newTime = new Date().getTime() / 1000;
+        var deltaTime = newTime - (time || newTime);
+        time = newTime;
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        var amount = particleRate * deltaTime;
+        for (var i = 0; i < amount; i++) {
+          var t = Math.PI - 2 * Math.PI * Math.random();
+          var scale = Math.sqrt(Math.random());
+          var pos = pointOnHeart(t);
+          pos.x *= scale * heartScale;
+          pos.y *= scale * heartScale;
+          var dir = pos.clone().length(settings.particles.velocity * heartScale);
+          particles.add(canvas.width / 2 + pos.x, canvas.height / 2 - pos.y, dir.x, -dir.y);
+        }
+
+        particles.update(deltaTime);
+        particles.draw(context, image);
+      }
+
+      function onResize() {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+        calculateHeartScale();
+      }
+
+      window.onresize = onResize;
+      window.addEventListener("orientationchange", onResize);
+
+      button.addEventListener("click", function(event) {
+        event.preventDefault();
+        if (isTransitioning) {
+          return;
+        }
+        isTransitioning = true;
+        button.classList.add("is-clicked");
+        canvas.classList.add("burst");
+        spawnBurst(260);
+        document.body.classList.add("transitioning");
+
+        setTimeout(function() {
+          window.location.href = "scene2.html";
+        }, 900);
+      });
+
+      setTimeout(function() {
+        onResize();
+        render();
+
+        // Đợi đám mây trái tim hiện đủ rõ (khoảng nửa chu kỳ particles.duration)
+        // rồi mới cho nút "Click me!" xuất hiện, thay vì hiện ngay từ đầu.
+        var revealDelay = (settings.particles.duration / 2) * 1000;
+        setTimeout(function() {
+          button.classList.add("visible");
+        }, revealDelay);
+      }, 10);
+    })(canvas);
+  </script>
+</body>
+</html>
